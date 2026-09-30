@@ -362,6 +362,143 @@ def is_valid_url(text):
         )
     )
 
+# =========================================================
+# WEATHER GEOCODING
+# =========================================================
+
+async def geocode_weather_location(
+    location: str
+):
+    """
+    Преобразует название места в координаты.
+
+    Работает с:
+    - городами
+    - посёлками
+    - деревнями
+    - сёлами
+    - хуторами
+    - районами
+    - другими населёнными пунктами
+
+    Понимает русские падежи через геокодер.
+    """
+
+    location = location.strip()
+
+    if not location:
+        return None
+
+    url = "https://nominatim.openstreetmap.org/search"
+
+    params = {
+        "q": location,
+        "format": "jsonv2",
+        "limit": 5,
+        "addressdetails": 1,
+        "accept-language": "ru"
+    }
+
+    headers = {
+        "User-Agent": (
+            "PiniyskayaFederationWeather/1.0 "
+            "(weather search)"
+        )
+    }
+
+    try:
+
+        async with httpx.AsyncClient(
+            timeout=15,
+            headers=headers
+        ) as client:
+
+            response = await client.get(
+                url,
+                params=params
+            )
+
+        if response.status_code != 200:
+            print(
+                "[GEOCODING ERROR]",
+                response.status_code,
+                response.text[:500]
+            )
+            return None
+
+        results = response.json()
+
+        if not results:
+            return None
+
+        # Сначала ищем населённые пункты
+        preferred_types = {
+            "city",
+            "town",
+            "village",
+            "hamlet",
+            "municipality",
+            "locality"
+        }
+
+        for item in results:
+
+            if item.get("type") in preferred_types:
+
+                return {
+                    "lat": float(item["lat"]),
+                    "lon": float(item["lon"]),
+                    "name": (
+                        item.get("name")
+                        or item.get("display_name")
+                    ),
+                    "display_name": item.get(
+                        "display_name",
+                        ""
+                    ),
+                    "type": item.get(
+                        "type",
+                        ""
+                    ),
+                    "address": item.get(
+                        "address",
+                        {}
+                    )
+                }
+
+        # Если специальный тип не найден,
+        # используем первый результат
+        item = results[0]
+
+        return {
+            "lat": float(item["lat"]),
+            "lon": float(item["lon"]),
+            "name": (
+                item.get("name")
+                or item.get("display_name")
+            ),
+            "display_name": item.get(
+                "display_name",
+                ""
+            ),
+            "type": item.get(
+                "type",
+                ""
+            ),
+            "address": item.get(
+                "address",
+                {}
+            )
+        }
+
+    except Exception as e:
+
+        print(
+            "[GEOCODING EXCEPTION]",
+            repr(e)
+        )
+
+        return None
 
 # =========================================================
 # FRONTEND
@@ -1276,7 +1413,6 @@ async def end_election(
         )
     }
 
-
 # =========================================================
 # WEATHER
 # =========================================================
@@ -1314,13 +1450,33 @@ async def weather(
         }
 
     # -----------------------------------------------------
-    # WEATHER BY CITY
+    # WEATHER BY CITY NAME
     # -----------------------------------------------------
 
     elif city:
 
+        # Сначала превращаем название места
+        # в координаты
+        location = await geocode_weather_location(
+            city
+        )
+
+        if not location:
+
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Место не найдено: "
+                    + city
+                )
+            )
+
+        lat = location["lat"]
+        lon = location["lon"]
+
         params = {
-            "q": city,
+            "lat": lat,
+            "lon": lon,
             "appid": OPENWEATHER_API_KEY,
             "units": "metric",
             "lang": "ru"
@@ -1330,8 +1486,15 @@ async def weather(
 
         raise HTTPException(
             status_code=400,
-            detail="City or coordinates are required."
+            detail=(
+                "City or coordinates "
+                "are required."
+            )
         )
+
+    # -----------------------------------------------------
+    # OPENWEATHER
+    # -----------------------------------------------------
 
     async with httpx.AsyncClient(
         timeout=15
@@ -1344,6 +1507,12 @@ async def weather(
 
     if response.status_code != 200:
 
+        print(
+            "[OPENWEATHER ERROR]",
+            response.status_code,
+            response.text[:500]
+        )
+
         raise HTTPException(
             status_code=response.status_code,
             detail="Weather service error."
@@ -1354,389 +1523,23 @@ async def weather(
     return {
         "city": data["name"],
         "country": data["sys"]["country"],
+
         "latitude": data["coord"]["lat"],
         "longitude": data["coord"]["lon"],
+
         "temperature": data["main"]["temp"],
         "feels_like": data["main"]["feels_like"],
         "humidity": data["main"]["humidity"],
+
         "description": data[
             "weather"
         ][0]["description"],
+
         "icon": data[
             "weather"
         ][0]["icon"]
     }
 
-# =========================================================
-# AI
-# =========================================================
-
-async def groq_chat(
-    messages
-):
-
-    if not GROQ_API_KEY:
-
-        raise HTTPException(
-            status_code=503,
-            detail="GROQ_API_KEY is not configured."
-        )
-
-    url = (
-        "https://api.groq.com/openai/v1/chat/completions"
-    )
-
-    headers = {
-        "Authorization":
-            f"Bearer {GROQ_API_KEY}",
-        "Content-Type":
-            "application/json"
-    }
-
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": 0.7
-    }
-
-    async with httpx.AsyncClient(
-        timeout=60
-    ) as client:
-
-        response = await client.post(
-            url,
-            headers=headers,
-            json=payload
-        )
-
-    if response.status_code != 200:
-        print(
-            "[GROQ ERROR]",
-            response.status_code,
-            response.text
-        )
-    
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Groq API error: "
-                f"{response.status_code} "
-                f"{response.text[:500]}"
-            )
-        )
-
-    data = response.json()
-
-    return data["choices"][0][
-        "message"
-    ]["content"]
-
-
-@app.post("/api/ai")
-async def ai(
-    request: Request
-):
-
-    require_db()
-
-    user = await require_user(request)
-
-    data = await request.json()
-
-    message = str(
-        data.get("message", "")
-    ).strip()
-
-    if not message:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Message is empty."
-        )
-
-    lower = message.lower()
-
-    # -----------------------------------------------------
-    # WEATHER DETECTION
-    # -----------------------------------------------------
-    
-    # -----------------------------------------------------
-    # 1. ПЫТАЕМСЯ НАЙТИ КООРДИНАТЫ
-    # -----------------------------------------------------
-    
-    coordinate_patterns = [
-    
-        # 55.75, 37.62
-        r"(?<!\d)(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)(?!\d)",
-    
-        # 55.75 37.62
-        r"(?<!\d)(-?\d{1,3}(?:\.\d+)?)\s+(-?\d{1,3}(?:\.\d+)?)(?!\d)"
-    ]
-    
-    coordinates = None
-    
-    for pattern in coordinate_patterns:
-    
-        coordinate_match = re.search(
-            pattern,
-            message
-        )
-    
-        if coordinate_match:
-    
-            try:
-    
-                lat = float(
-                    coordinate_match.group(1)
-                )
-    
-                lon = float(
-                    coordinate_match.group(2)
-                )
-    
-                # Проверяем допустимость координат
-    
-                if (
-                    -90 <= lat <= 90
-                    and
-                    -180 <= lon <= 180
-                ):
-    
-                    coordinates = (
-                        lat,
-                        lon
-                    )
-    
-                    break
-    
-            except ValueError:
-    
-                pass
-    
-    
-    # -----------------------------------------------------
-    # 2. ОПРЕДЕЛЯЕМ, ЧТО ПОЛЬЗОВАТЕЛЬ ХОЧЕТ ПОГОДУ
-    # -----------------------------------------------------
-    
-    weather_keywords = [
-    
-        "погода",
-        "погоде",
-        "погодой",
-        "погоду",
-    
-        "температура",
-        "температуре",
-        "температуру",
-    
-        "температурой",
-    
-        "weather",
-        "temperature",
-        "forecast",
-        "climate"
-    ]
-    
-    is_weather_request = any(
-        keyword in lower
-        for keyword in weather_keywords
-    )
-    
-    
-    # -----------------------------------------------------
-    # 3. ЕСЛИ ЕСТЬ КООРДИНАТЫ ИЛИ ЯВНЫЙ ЗАПРОС ПОГОДЫ
-    # -----------------------------------------------------
-    
-    if coordinates and (
-        is_weather_request
-        or
-        len(lower.split()) <= 6
-    ):
-    
-        lat, lon = coordinates
-    
-        try:
-    
-            weather_data = await weather(
-                lat=lat,
-                lon=lon
-            )
-    
-            answer = (
-                f"Сейчас в районе "
-                f"{weather_data['city']}, "
-                f"{weather_data['country']}: "
-                f"{weather_data['temperature']}°C, "
-                f"{weather_data['description']}. "
-                f"Влажность — "
-                f"{weather_data['humidity']}%."
-            )
-    
-            result = {
-                "type": "weather",
-                "answer": answer,
-                "weather": weather_data
-            }
-    
-            await ai_messages.insert_one({
-    
-                "user_id": user["_id"],
-    
-                "user_message": message,
-    
-                "assistant_message": answer,
-    
-                "type": "weather",
-    
-                "created_at": now()
-    
-            })
-    
-            return result
-    
-        except HTTPException:
-    
-            pass
-    
-    
-    # -----------------------------------------------------
-    # 4. ЕСЛИ ЭТО ЗАПРОС ПОГОДЫ ПО НАЗВАНИЮ МЕСТА
-    # -----------------------------------------------------
-    
-    if is_weather_request:
-    
-        city = None
-    
-        # -------------------------------------------------
-        # ВАРИАНТЫ:
-        #
-        # погода в Москве
-        # погода в Тель-Авиве
-        # температура в Санкт-Петербурге
-        # weather in Moscow
-        # weather in Tel Aviv
-        # -------------------------------------------------
-    
-        location_patterns = [
-    
-            r"(?:погод[аеуы]|температур[аеуы]).*?"
-            r"(?:в|у|для|на)\s+"
-            r"(.+?)(?:\?|!|$)",
-    
-            r"(?:weather|temperature|forecast).*?"
-            r"(?:in|at|for)\s+"
-            r"(.+?)(?:\?|!|$)"
-    
-        ]
-    
-        for pattern in location_patterns:
-    
-            location_match = re.search(
-                pattern,
-                lower,
-                flags=re.IGNORECASE
-            )
-    
-            if location_match:
-    
-                city = location_match.group(1).strip()
-    
-                break
-    
-        # -------------------------------------------------
-        # ЕСЛИ МЕСТО НЕ НАШЛИ — ПРОБУЕМ УБРАТЬ
-        # СЛОВА "ПОГОДА", "ТЕМПЕРАТУРА" И Т.Д.
-        # -------------------------------------------------
-    
-        if not city:
-    
-            city_candidate = lower
-    
-            city_candidate = re.sub(
-                r"\b(какая|какой|какое|сейчас|сегодня|"
-                r"мне|покажи|скажи|расскажи|"
-                r"погода|погоде|погоду|погодой|"
-                r"температура|температуре|температуру|"
-                r"weather|temperature|forecast)\b",
-                " ",
-                city_candidate,
-                flags=re.IGNORECASE
-            )
-    
-            city_candidate = re.sub(
-                r"\s+",
-                " ",
-                city_candidate
-            ).strip()
-    
-            city = city_candidate
-    
-        # -------------------------------------------------
-        # УБИРАЕМ ЛИШНИЕ СЛОВА
-        # -------------------------------------------------
-    
-        if city:
-    
-            city = re.sub(
-                r"^(в|у|для|на|in|at|for)\s+",
-                "",
-                city,
-                flags=re.IGNORECASE
-            ).strip()
-    
-            city = re.sub(
-                r"\s+(сейчас|сегодня|там|сейчас там)$",
-                "",
-                city,
-                flags=re.IGNORECASE
-            ).strip()
-    
-        # -------------------------------------------------
-        # ЗАПРАШИВАЕМ ПОГОДУ
-        # -------------------------------------------------
-    
-        if city:
-    
-            try:
-    
-                weather_data = await weather(
-                    city=city
-                )
-    
-                answer = (
-                    f"Сейчас в {weather_data['city']}, "
-                    f"{weather_data['country']}: "
-                    f"{weather_data['temperature']}°C, "
-                    f"{weather_data['description']}. "
-                    f"Влажность — "
-                    f"{weather_data['humidity']}%."
-                )
-    
-                result = {
-                    "type": "weather",
-                    "answer": answer,
-                    "weather": weather_data
-                }
-    
-                await ai_messages.insert_one({
-    
-                    "user_id": user["_id"],
-    
-                    "user_message": message,
-    
-                    "assistant_message": answer,
-    
-                    "type": "weather",
-    
-                    "created_at": now()
-    
-                })
-    
-                return result
-    
-            except HTTPException:
-    
-                pass
     # -----------------------------------------------------
     # NORMAL GROQ CHAT
     # -----------------------------------------------------
