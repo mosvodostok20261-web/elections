@@ -1669,7 +1669,6 @@ async function processVoice() {
                                     response.image_prompt
                             })
                         }
-                    }
                 );
 
             addAiImage(
