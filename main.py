@@ -1540,9 +1540,78 @@ async def weather(
         ][0]["icon"]
     }
 
-# -----------------------------------------------------
-# WEATHER DETECTION
-# -----------------------------------------------------
+
+# =========================================================
+# AI CHAT + WEATHER
+# =========================================================
+
+async def groq_chat(messages):
+    """
+    Отправляет сообщения в Groq и возвращает ответ ИИ.
+    """
+
+    if not GROQ_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GROQ_API_KEY is not configured."
+        )
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": 0.7
+    }
+
+    async with httpx.AsyncClient(timeout=120) as client:
+
+        response = await client.post(
+            url,
+            headers=headers,
+            json=payload
+        )
+
+    if response.status_code != 200:
+
+        print(
+            "[GROQ ERROR]",
+            response.status_code,
+            response.text[:1000]
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Groq API error."
+        )
+
+    data = response.json()
+
+    try:
+
+        return data["choices"][0]["message"]["content"]
+
+    except (KeyError, IndexError, TypeError):
+
+        print(
+            "[GROQ ERROR] Invalid response:",
+            data
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid response from Groq."
+        )
+
+
+# ---------------------------------------------------------
+# WEATHER KEYWORDS
+# ---------------------------------------------------------
 
 weather_keywords = [
 
@@ -1564,132 +1633,85 @@ weather_keywords = [
     "forecast"
 ]
 
-is_weather_request = any(
-    keyword in lower
-    for keyword in weather_keywords
-)
 
+def is_weather_message(message: str) -> bool:
 
-# -----------------------------------------------------
-# ИЩЕМ КООРДИНАТЫ
-# -----------------------------------------------------
+    lower = message.lower()
 
-coordinate_patterns = [
-
-    r"(?<!\d)"
-    r"(-?\d{1,3}(?:\.\d+)?)"
-    r"\s*,\s*"
-    r"(-?\d{1,3}(?:\.\d+)?)"
-    r"(?!\d)",
-
-    r"(?<!\d)"
-    r"(-?\d{1,3}(?:\.\d+)?)"
-    r"\s+"
-    r"(-?\d{1,3}(?:\.\d+)?)"
-    r"(?!\d)"
-]
-
-coordinates = None
-
-for pattern in coordinate_patterns:
-
-    match = re.search(
-        pattern,
-        message
+    return any(
+        keyword in lower
+        for keyword in weather_keywords
     )
 
-    if not match:
-        continue
 
-    try:
+# ---------------------------------------------------------
+# COORDINATE DETECTION
+# ---------------------------------------------------------
 
-        lat = float(
-            match.group(1)
+def extract_coordinates(message: str):
+
+    coordinate_patterns = [
+
+        r"(?<!\d)"
+        r"(-?\d{1,3}(?:\.\d+)?)"
+        r"\s*,\s*"
+        r"(-?\d{1,3}(?:\.\d+)?)"
+        r"(?!\d)",
+
+        r"(?<!\d)"
+        r"(-?\d{1,3}(?:\.\d+)?)"
+        r"\s+"
+        r"(-?\d{1,3}(?:\.\d+)?)"
+        r"(?!\d)"
+    ]
+
+    for pattern in coordinate_patterns:
+
+        match = re.search(
+            pattern,
+            message
         )
 
-        lon = float(
-            match.group(2)
-        )
+        if not match:
+            continue
 
-        if (
-            -90 <= lat <= 90
-            and
-            -180 <= lon <= 180
-        ):
+        try:
 
-            coordinates = (
-                lat,
-                lon
+            lat = float(
+                match.group(1)
             )
 
-            break
+            lon = float(
+                match.group(2)
+            )
 
-    except ValueError:
+            if (
+                -90 <= lat <= 90
+                and
+                -180 <= lon <= 180
+            ):
 
-        pass
+                return lat, lon
 
+        except ValueError:
 
-# -----------------------------------------------------
-# ЕСЛИ ЕСТЬ КООРДИНАТЫ
-# -----------------------------------------------------
+            pass
 
-if coordinates:
-
-    lat, lon = coordinates
-
-    try:
-
-        weather_data = await weather(
-            lat=lat,
-            lon=lon
-        )
-
-        answer = (
-            f"Сейчас в районе "
-            f"{weather_data['city']}, "
-            f"{weather_data['country']}: "
-            f"{weather_data['temperature']}°C, "
-            f"{weather_data['description']}. "
-            f"Влажность — "
-            f"{weather_data['humidity']}%."
-        )
-
-        result = {
-            "type": "weather",
-            "answer": answer,
-            "weather": weather_data
-        }
-
-        await ai_messages.insert_one({
-
-            "user_id": user["_id"],
-
-            "user_message": message,
-
-            "assistant_message": answer,
-
-            "type": "weather",
-
-            "created_at": now()
-
-        })
-
-        return result
-
-    except HTTPException:
-
-        pass
+    return None
 
 
-# -----------------------------------------------------
-# ЕСЛИ ЭТО ЗАПРОС ПОГОДЫ ПО НАЗВАНИЮ
-# -----------------------------------------------------
+# ---------------------------------------------------------
+# LOCATION EXTRACTION
+# ---------------------------------------------------------
 
-if is_weather_request:
+def extract_weather_location(message: str):
 
-    location = None
+    patterns = [
 
-    location_patterns = [
+        # Русский:
+        # погода в Москве
+        # температура в Тель-Авиве
+        # прогноз для Минска
 
         r"(?:погод[аеуы]|"
         r"температур[аеуы]|"
@@ -1699,6 +1721,11 @@ if is_weather_request:
         r"\s+"
         r"(.+?)(?:\?|!|$|,|;)",
 
+        # Английский:
+        # weather in London
+        # temperature in Paris
+        # forecast for Berlin
+
         r"(?:weather|temperature|forecast)"
         r".*?"
         r"(?:in|at|for|near)"
@@ -1706,7 +1733,7 @@ if is_weather_request:
         r"(.+?)(?:\?|!|$|,|;)"
     ]
 
-    for pattern in location_patterns:
+    for pattern in patterns:
 
         match = re.search(
             pattern,
@@ -1714,27 +1741,15 @@ if is_weather_request:
             flags=re.IGNORECASE
         )
 
-        if match:
+        if not match:
+            continue
 
-            location = (
-                match.group(1)
-                .strip()
-            )
-
-            break
-
-
-    # -------------------------------------------------
-    # ОЧИЩАЕМ НАЗВАНИЕ МЕСТА
-    # -------------------------------------------------
-
-    if location:
+        location = match.group(1).strip()
 
         location = re.sub(
             r"\s+"
             r"(сейчас|сегодня|"
-            r"там|сейчас там|"
-            r"в данный момент)"
+            r"там|в данный момент)"
             r"$",
             "",
             location,
@@ -1745,33 +1760,173 @@ if is_weather_request:
             " \t\n\r.,!?;:"
         )
 
+        if location:
+            return location
 
-    # -------------------------------------------------
-    # ГЕОКОДИРОВАНИЕ + ПОГОДА
-    # -------------------------------------------------
+    return None
 
-    if location:
 
-        try:
+# =========================================================
+# AI ENDPOINT
+# =========================================================
 
-            weather_data = await weather(
-                city=location
-            )
+@app.post("/api/ai")
+async def ai_chat(
+    request: Request
+):
+
+    require_db()
+
+    user = await require_user(request)
+
+    data = await request.json()
+
+    message = str(
+        data.get("message", "")
+    ).strip()
+
+    if not message:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Message is empty."
+        )
+
+    if len(message) > 10000:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Message is too long."
+        )
+
+    # =====================================================
+    # WEATHER
+    # =====================================================
+
+    if is_weather_message(message):
+
+        coordinates = extract_coordinates(
+            message
+        )
+
+        # -------------------------------------------------
+        # WEATHER BY COORDINATES
+        # -------------------------------------------------
+
+        if coordinates:
+
+            lat, lon = coordinates
+
+            try:
+
+                weather_data = await weather(
+                    lat=lat,
+                    lon=lon
+                )
+
+                answer = (
+                    f"Сейчас в районе "
+                    f"{weather_data['city']}, "
+                    f"{weather_data['country']}: "
+                    f"{weather_data['temperature']}°C, "
+                    f"{weather_data['description']}. "
+                    f"Влажность — "
+                    f"{weather_data['humidity']}%."
+                )
+
+                await ai_messages.insert_one({
+
+                    "user_id": user["_id"],
+
+                    "user_message": message,
+
+                    "assistant_message": answer,
+
+                    "type": "weather",
+
+                    "created_at": now()
+
+                })
+
+                return {
+                    "type": "weather",
+                    "answer": answer,
+                    "weather": weather_data
+                }
+
+            except HTTPException as e:
+
+                print(
+                    "[WEATHER COORDINATES ERROR]",
+                    e.detail
+                )
+
+        # -------------------------------------------------
+        # WEATHER BY PLACE NAME
+        # -------------------------------------------------
+
+        location = extract_weather_location(
+            message
+        )
+
+        if location:
+
+            try:
+
+                weather_data = await weather(
+                    city=location
+                )
+
+                answer = (
+                    f"Сейчас в "
+                    f"{weather_data['city']}, "
+                    f"{weather_data['country']}: "
+                    f"{weather_data['temperature']}°C, "
+                    f"{weather_data['description']}. "
+                    f"Влажность — "
+                    f"{weather_data['humidity']}%."
+                )
+
+                await ai_messages.insert_one({
+
+                    "user_id": user["_id"],
+
+                    "user_message": message,
+
+                    "assistant_message": answer,
+
+                    "type": "weather",
+
+                    "created_at": now()
+
+                })
+
+                return {
+                    "type": "weather",
+                    "answer": answer,
+                    "weather": weather_data
+                }
+
+            except HTTPException as e:
+
+                print(
+                    "[WEATHER LOCATION ERROR]",
+                    e.detail
+                )
+
+        # -------------------------------------------------
+        # WEATHER REQUEST BUT LOCATION NOT FOUND
+        # -------------------------------------------------
+
+        if location:
 
             answer = (
-                f"Сейчас в {weather_data['city']}, "
-                f"{weather_data['country']}: "
-                f"{weather_data['temperature']}°C, "
-                f"{weather_data['description']}. "
-                f"Влажность — "
-                f"{weather_data['humidity']}%."
+                f"Я не смог найти место "
+                f"«{location}». "
+                f"Попробуй указать название "
+                f"города или координаты, например "
+                f"`50.45, 30.52`."
             )
-
-            result = {
-                "type": "weather",
-                "answer": answer,
-                "weather": weather_data
-            }
 
             await ai_messages.insert_one({
 
@@ -1781,36 +1936,43 @@ if is_weather_request:
 
                 "assistant_message": answer,
 
-                "type": "weather",
+                "type": "weather_error",
 
                 "created_at": now()
 
             })
 
-            return result
+            return {
+                "type": "weather",
+                "answer": answer,
+                "weather": None
+            }
 
-        except HTTPException:
 
-            pass
-
-    # -----------------------------------------------------
+    # =====================================================
     # NORMAL GROQ CHAT
-    # -----------------------------------------------------
+    # =====================================================
 
     system_prompt = """
 Ты ИИ-помощник Пинийской Федерации.
 
-Отвечай на русском языке, если пользователь не попросил
-другой язык.
+Отвечай на русском языке, если пользователь
+не попросил другой язык.
 
 Будь полезным, понятным и дружелюбным.
 
 Если пользователь просит создать изображение,
-верни в ответ специальную строку:
+НЕ создавай изображение самостоятельно.
 
-IMAGE_PROMPT: <улучшенный английский prompt>
+Вместо этого обязательно верни специальную строку:
 
-После этой строки кратко опиши, что будет изображено.
+IMAGE_PROMPT: <подробный улучшенный английский prompt>
+
+После строки IMAGE_PROMPT можешь кратко
+описать результат на русском языке.
+
+Если пользователь не просит изображение,
+не используй IMAGE_PROMPT.
 """
 
     answer = await groq_chat([
@@ -1824,40 +1986,66 @@ IMAGE_PROMPT: <улучшенный английский prompt>
         }
     ])
 
+    # =====================================================
+    # IMAGE PROMPT DETECTION
+    # =====================================================
+
     image_prompt = None
 
     match = re.search(
-        r"IMAGE_PROMPT:\s*(.+)",
+        r"IMAGE_PROMPT:\s*(.+?)(?:\n|$)",
         answer,
         re.IGNORECASE
     )
 
     if match:
 
-        image_prompt = match.group(1).strip()
+        image_prompt = (
+            match.group(1)
+            .strip()
+        )
+
+    # =====================================================
+    # SAVE AI MESSAGE
+    # =====================================================
 
     await ai_messages.insert_one({
+
         "user_id": user["_id"],
+
         "user_message": message,
+
         "assistant_message": answer,
+
         "type": (
             "image"
             if image_prompt
             else "chat"
         ),
+
+        "image_prompt": image_prompt,
+
         "created_at": now()
+
     })
 
+    # =====================================================
+    # RESPONSE
+    # =====================================================
+
     return {
+
         "type": (
             "image"
             if image_prompt
             else "chat"
         ),
-        "answer": answer,
-        "image_prompt": image_prompt
-    }
 
+        "answer": answer,
+
+        "image_prompt": image_prompt
+
+    }
 
 # =========================================================
 # CLOUDFLARE IMAGE GENERATION
