@@ -336,14 +336,96 @@ async function loadCandidates() {
     }
 }
 
-
 function renderCandidates() {
 
     const grid =
         $("#candidateGrid");
 
+    /*
+     * Удаляем старую кнопку загрузки,
+     * если она уже была создана.
+     */
+    const oldUpload =
+        document.querySelector(
+            ".candidate-upload-container"
+        );
+
+    if (oldUpload) {
+        oldUpload.remove();
+    }
+
     grid.innerHTML = "";
 
+    /*
+     * Есть ли хотя бы один кандидат
+     * без изображения?
+     */
+    const hasEmptyCandidate =
+        candidates.some(
+            candidate =>
+                !candidate.image_url
+        );
+
+    /*
+     * Если есть свободное место —
+     * показываем кнопку загрузки.
+     */
+    if (hasEmptyCandidate) {
+
+        const uploadContainer =
+            document.createElement(
+                "div"
+            );
+
+        uploadContainer.className =
+            "candidate-upload-container";
+
+        uploadContainer.innerHTML = `
+            <button
+                id="candidateImageUploadButton"
+                class="candidate-upload-button"
+                type="button"
+            >
+                🖼️ Загрузить изображение
+            </button>
+
+            <input
+                id="candidateImageInput"
+                type="file"
+                accept="image/*"
+                hidden
+            >
+        `;
+
+        grid.parentElement.insertBefore(
+            uploadContainer,
+            grid
+        );
+
+        const button =
+            uploadContainer.querySelector(
+                "#candidateImageUploadButton"
+            );
+
+        const input =
+            uploadContainer.querySelector(
+                "#candidateImageInput"
+            );
+
+        button.addEventListener(
+            "click",
+            () => input.click()
+        );
+
+        input.addEventListener(
+            "change",
+            uploadCandidateImage
+        );
+    }
+
+    /*
+     * Рисуем карточки кандидатов.
+     */
     candidates.forEach(
         candidate => {
 
@@ -362,6 +444,7 @@ function renderCandidates() {
                         <img
                             class="candidate-image"
                             src="${candidate.image_url}"
+                            alt="Кандидат №${candidate.slot}"
                         >
                     `
                     : `
@@ -401,12 +484,99 @@ function renderCandidates() {
                 () => openCandidate(candidate)
             );
 
-            grid.appendChild(card);
-
+            grid.appendChild(
+                card
+            );
         }
     );
 }
 
+async function uploadCandidateImage(event) {
+
+    const input =
+        event.target;
+
+    if (
+        !input.files ||
+        !input.files.length
+    ) {
+        return;
+    }
+
+    const file =
+        input.files[0];
+
+    /*
+     * Дополнительная проверка на клиенте.
+     */
+    if (!file.type.startsWith("image/")) {
+
+        showToast(
+            "Можно загружать только изображения."
+        );
+
+        input.value = "";
+
+        return;
+    }
+
+    if (
+        file.size >
+        10 * 1024 * 1024
+    ) {
+
+        showToast(
+            "Изображение слишком большое. Максимум 10 MB."
+        );
+
+        input.value = "";
+
+        return;
+    }
+
+    const form =
+        new FormData();
+
+    form.append(
+        "image",
+        file
+    );
+
+    try {
+
+        showToast(
+            "Загрузка изображения..."
+        );
+
+        await api(
+            "/api/candidates/upload-image",
+            {
+                method: "POST",
+                body: form
+            }
+        );
+
+        /*
+         * Загружаем актуальные данные
+         * с сервера.
+         */
+        await loadCandidates();
+
+        showToast(
+            "Изображение успешно загружено."
+        );
+
+    } catch (error) {
+
+        showToast(
+            error.message
+        );
+
+    } finally {
+
+        input.value = "";
+    }
+}
 
 /* =========================================================
    CANDIDATE MODAL
