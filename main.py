@@ -1459,60 +1459,284 @@ async def ai(
     # -----------------------------------------------------
     # WEATHER DETECTION
     # -----------------------------------------------------
-
-    weather_match = re.search(
-        r"(?:погод[аеуы]|температур[аеуы]).*?"
-        r"(?:в|у|для|на)\s+"
-        r"([A-Za-zА-Яа-яЁё0-9\s-]+?)(?:\?|$|,|!|\.)",
-        lower
+    
+    # -----------------------------------------------------
+    # 1. ПЫТАЕМСЯ НАЙТИ КООРДИНАТЫ
+    # -----------------------------------------------------
+    
+    coordinate_patterns = [
+    
+        # 55.75, 37.62
+        r"(?<!\d)(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)(?!\d)",
+    
+        # 55.75 37.62
+        r"(?<!\d)(-?\d{1,3}(?:\.\d+)?)\s+(-?\d{1,3}(?:\.\d+)?)(?!\d)"
+    ]
+    
+    coordinates = None
+    
+    for pattern in coordinate_patterns:
+    
+        coordinate_match = re.search(
+            pattern,
+            message
+        )
+    
+        if coordinate_match:
+    
+            try:
+    
+                lat = float(
+                    coordinate_match.group(1)
+                )
+    
+                lon = float(
+                    coordinate_match.group(2)
+                )
+    
+                # Проверяем допустимость координат
+    
+                if (
+                    -90 <= lat <= 90
+                    and
+                    -180 <= lon <= 180
+                ):
+    
+                    coordinates = (
+                        lat,
+                        lon
+                    )
+    
+                    break
+    
+            except ValueError:
+    
+                pass
+    
+    
+    # -----------------------------------------------------
+    # 2. ОПРЕДЕЛЯЕМ, ЧТО ПОЛЬЗОВАТЕЛЬ ХОЧЕТ ПОГОДУ
+    # -----------------------------------------------------
+    
+    weather_keywords = [
+    
+        "погода",
+        "погоде",
+        "погодой",
+        "погоду",
+    
+        "температура",
+        "температуре",
+        "температуру",
+    
+        "температурой",
+    
+        "weather",
+        "temperature",
+        "forecast",
+        "climate"
+    ]
+    
+    is_weather_request = any(
+        keyword in lower
+        for keyword in weather_keywords
     )
-
-    if weather_match:
-
-        city = weather_match.group(1).strip()
-
-        # Убираем возможные лишние слова в конце
-        city = re.sub(
-            r"\s+(сейчас|сегодня|сейчас\s+там)$",
-            "",
-            city,
-            flags=re.IGNORECASE
-        ).strip()
-
+    
+    
+    # -----------------------------------------------------
+    # 3. ЕСЛИ ЕСТЬ КООРДИНАТЫ ИЛИ ЯВНЫЙ ЗАПРОС ПОГОДЫ
+    # -----------------------------------------------------
+    
+    if coordinates and (
+        is_weather_request
+        or
+        len(lower.split()) <= 6
+    ):
+    
+        lat, lon = coordinates
+    
         try:
-
+    
             weather_data = await weather(
-                city
+                lat=lat,
+                lon=lon
             )
-
+    
             answer = (
-                f"Сейчас в {weather_data['city']}, "
+                f"Сейчас в районе "
+                f"{weather_data['city']}, "
                 f"{weather_data['country']}: "
                 f"{weather_data['temperature']}°C, "
                 f"{weather_data['description']}. "
                 f"Влажность — "
                 f"{weather_data['humidity']}%."
             )
-
+    
             result = {
                 "type": "weather",
                 "answer": answer,
                 "weather": weather_data
             }
-
+    
             await ai_messages.insert_one({
+    
                 "user_id": user["_id"],
+    
                 "user_message": message,
+    
                 "assistant_message": answer,
+    
                 "type": "weather",
+    
                 "created_at": now()
+    
             })
-
+    
             return result
-
+    
         except HTTPException:
+    
             pass
-
+    
+    
+    # -----------------------------------------------------
+    # 4. ЕСЛИ ЭТО ЗАПРОС ПОГОДЫ ПО НАЗВАНИЮ МЕСТА
+    # -----------------------------------------------------
+    
+    if is_weather_request:
+    
+        city = None
+    
+        # -------------------------------------------------
+        # ВАРИАНТЫ:
+        #
+        # погода в Москве
+        # погода в Тель-Авиве
+        # температура в Санкт-Петербурге
+        # weather in Moscow
+        # weather in Tel Aviv
+        # -------------------------------------------------
+    
+        location_patterns = [
+    
+            r"(?:погод[аеуы]|температур[аеуы]).*?"
+            r"(?:в|у|для|на)\s+"
+            r"(.+?)(?:\?|!|$)",
+    
+            r"(?:weather|temperature|forecast).*?"
+            r"(?:in|at|for)\s+"
+            r"(.+?)(?:\?|!|$)"
+    
+        ]
+    
+        for pattern in location_patterns:
+    
+            location_match = re.search(
+                pattern,
+                lower,
+                flags=re.IGNORECASE
+            )
+    
+            if location_match:
+    
+                city = location_match.group(1).strip()
+    
+                break
+    
+        # -------------------------------------------------
+        # ЕСЛИ МЕСТО НЕ НАШЛИ — ПРОБУЕМ УБРАТЬ
+        # СЛОВА "ПОГОДА", "ТЕМПЕРАТУРА" И Т.Д.
+        # -------------------------------------------------
+    
+        if not city:
+    
+            city_candidate = lower
+    
+            city_candidate = re.sub(
+                r"\b(какая|какой|какое|сейчас|сегодня|"
+                r"мне|покажи|скажи|расскажи|"
+                r"погода|погоде|погоду|погодой|"
+                r"температура|температуре|температуру|"
+                r"weather|temperature|forecast)\b",
+                " ",
+                city_candidate,
+                flags=re.IGNORECASE
+            )
+    
+            city_candidate = re.sub(
+                r"\s+",
+                " ",
+                city_candidate
+            ).strip()
+    
+            city = city_candidate
+    
+        # -------------------------------------------------
+        # УБИРАЕМ ЛИШНИЕ СЛОВА
+        # -------------------------------------------------
+    
+        if city:
+    
+            city = re.sub(
+                r"^(в|у|для|на|in|at|for)\s+",
+                "",
+                city,
+                flags=re.IGNORECASE
+            ).strip()
+    
+            city = re.sub(
+                r"\s+(сейчас|сегодня|там|сейчас там)$",
+                "",
+                city,
+                flags=re.IGNORECASE
+            ).strip()
+    
+        # -------------------------------------------------
+        # ЗАПРАШИВАЕМ ПОГОДУ
+        # -------------------------------------------------
+    
+        if city:
+    
+            try:
+    
+                weather_data = await weather(
+                    city=city
+                )
+    
+                answer = (
+                    f"Сейчас в {weather_data['city']}, "
+                    f"{weather_data['country']}: "
+                    f"{weather_data['temperature']}°C, "
+                    f"{weather_data['description']}. "
+                    f"Влажность — "
+                    f"{weather_data['humidity']}%."
+                )
+    
+                result = {
+                    "type": "weather",
+                    "answer": answer,
+                    "weather": weather_data
+                }
+    
+                await ai_messages.insert_one({
+    
+                    "user_id": user["_id"],
+    
+                    "user_message": message,
+    
+                    "assistant_message": answer,
+    
+                    "type": "weather",
+    
+                    "created_at": now()
+    
+                })
+    
+                return result
+    
+            except HTTPException:
+    
+                pass
     # -----------------------------------------------------
     # NORMAL GROQ CHAT
     # -----------------------------------------------------
