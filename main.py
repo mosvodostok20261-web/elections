@@ -928,10 +928,15 @@ async def upload_candidate_image(
 
     require_db()
 
-    # Пользователь должен быть авторизован
     await require_user(request)
 
-    # Проверяем тип файла
+    if not image:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Изображение не загружено."
+        )
+
     if (
         not image.content_type
         or not image.content_type.startswith("image/")
@@ -942,22 +947,20 @@ async def upload_candidate_image(
             detail="Можно загружать только изображения."
         )
 
-    # Читаем файл
     data = await image.read()
-
-    # Максимальный размер — 10 MB
-    if len(data) > 10 * 1024 * 1024:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Изображение слишком большое. Максимум 10 MB."
-        )
 
     if not data:
 
         raise HTTPException(
             status_code=400,
             detail="Файл пустой."
+        )
+
+    if len(data) > 10 * 1024 * 1024:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Изображение слишком большое. Максимум 10 MB."
         )
 
     # Ищем первого кандидата без изображения
@@ -989,14 +992,13 @@ async def upload_candidate_image(
             detail="У всех кандидатов уже есть изображения."
         )
 
-    # Создаём ID файла
+    # Сохраняем изображение
     file_id = uuid.uuid4().hex
 
-    # Сохраняем изображение в MongoDB
     await files_collection.insert_one({
         "_id": file_id,
         "content_type": image.content_type,
-        "filename": image.filename,
+        "filename": image.filename or "candidate-image",
         "data": data,
         "created_at": now()
     })
@@ -1013,7 +1015,6 @@ async def upload_candidate_image(
         }
     )
 
-    # Получаем обновлённого кандидата
     updated_candidate = await candidates.find_one(
         {
             "_id": candidate["_id"]
