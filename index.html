@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Пинийская Федерация — Выборы
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
+
+</head>
+
+<body>
+
+<div class="background-grid"></div>
+
+<div id="toast" class="toast"></div>
+
+
+<!-- =====================================================
+     AUTH
+===================================================== -->
+
+<div id="authScreen" class="auth-screen">
+
+    <div class="auth-card">
+
+        <div class="logo">
+            PF
+        </div>
+
+        <div class="eyebrow">
+            ПИНИЙСКАЯ ФЕДЕРАЦИЯ
+        </div>
+
+        <h1>
+            Президентские выборы
+        </h1>
+
+        <p class="auth-description">
+            Добро пожаловать на официальный
+            портал выборов.
+        </p>
+
+        <div class="auth-tabs">
+
+            <button
+                id="loginTab"
+                class="auth-tab active"
+            >
+                Войти
+            </button>
+
+            <button
+                id="registerTab"
+                class="auth-tab"
+            >
+                Регистрация
+            </button>
+
+        </div>
+
+        <form id="authForm">
+
+            <input
+                id="username"
+                type="text"
+                placeholder="Имя пользователя"
+                required
+            >
+
+            <input
+                id="password"
+                type="password"
+                placeholder="Пароль"
+                required
+            >
+
+            <button
+                class="neon-button"
+                type="submit"
+            >
+                <span id="authButtonText">
+                    Войти
+                </span>
+            </button>
+
+        </form>
+
+        <div
+            id="authError"
+            class="error-message"
+        ></div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     MAIN APPLICATION
+===================================================== -->
+
+<div
+    id="app"
+    class="app hidden"
+>
+
+    <header class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-logo">
+                PF
+            </div>
+
+            <div>
+                <strong>
+                    ПИНИЙСКАЯ ФЕДЕРАЦИЯ
+                </strong>
+
+                <span>
+                    ELECTORAL NETWORK
+                </span>
+            </div>
+
+        </div>
+
+        <div class="user-area">
+
+            <span id="currentUser">
+                Пользователь
+            </span>
+
+            <button
+                id="logoutButton"
+                class="small-button"
+            >
+                Выйти
+            </button>
+
+        </div>
+
+    </header>
+
+
+    <!-- =================================================
+         NAVIGATION
+    ================================================== -->
+
+    <nav class="navigation">
+
+        <button
+            class="nav-button active"
+            data-section="elections"
+        >
+            <span>01</span>
+            Кандидаты
+        </button>
+
+        <button
+            class="nav-button"
+            data-section="results"
+        >
+            <span>02</span>
+            Данные о голосовании
+        </button>
+
+        <button
+            class="nav-button"
+            data-section="chat"
+        >
+            <span>03</span>
+            Общий чат
+        </button>
+
+        <button
+            class="nav-button"
+            data-section="ai"
+        >
+            <span>04</span>
+            ИИ-помощник
+        </button>
+
+    </nav>
+
+
+    <main>
+
+
+        <!-- =================================================
+             SECTION 1
+        ================================================== -->
+
+        <section
+            id="elections"
+            class="section active"
+        >
+
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        01 / ELECTION
+                    </div>
+
+                    <h2>
+                        Кандидаты
+                    </h2>
+
+                </div>
+
+                <div
+                    id="electionStatus"
+                    class="status-pill"
+                >
+                    ГОЛОСОВАНИЕ ОТКРЫТО
+                </div>
+
+            </div>
+
+
+            <div
+                id="candidateGrid"
+                class="candidate-grid"
+            ></div>
+
+        </section>
+
+
+        <!-- =================================================
+             SECTION 2
+        ================================================== -->
+
+        <section
+            id="results"
+            class="section"
+        >
+
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        02 / RESULTS
+                    </div>
+
+                    <h2>
+                        Данные о голосовании
+                    </h2>
+
+                </div>
+
+                <div class="total-votes">
+                    Голосов:
+                    <strong id="totalVotes">
+                        0
+                    </strong>
+                </div>
+
+            </div>
+
+            <div
+                id="resultsList"
+                class="results-list"
+            ></div>
+
+        </section>
+
+
+        <!-- =================================================
+             SECTION 3
+        ================================================== -->
+
+        <section
+            id="chat"
+            class="section"
+        >
+
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        03 / NETWORK
+                    </div>
+
+                    <h2>
+                        Общий чат
+                    </h2>
+
+                </div>
+
+                <div class="live-indicator">
+                    <i></i>
+                    LIVE
+                </div>
+
+            </div>
+
+
+            <div class="chat-window">
+
+                <div
+                    id="chatMessages"
+                    class="chat-messages"
+                ></div>
+
+                <form
+                    id="chatForm"
+                    class="chat-input-area"
+                >
+
+                    <input
+                        id="chatInput"
+                        type="text"
+                        placeholder="Напишите сообщение..."
+                        autocomplete="off"
+                    >
+
+                    <label class="file-button">
+
+                        +
+                        <input
+                            id="chatImage"
+                            type="file"
+                            accept="image/*"
+                            hidden
+                        >
+
+                    </label>
+
+                    <button
+                        type="submit"
+                        class="send-button"
+                    >
+                        →
+                    </button>
+
+                </form>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             SECTION 4
+        ================================================== -->
+
+        <section
+            id="ai"
+            class="section"
+        >
+
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        04 / ARTIFICIAL INTELLIGENCE
+                    </div>
+
+                    <h2>
+                        ИИ-помощник
+                    </h2>
+
+                </div>
+
+            </div>
+
+
+            <div class="ai-layout">
+
+                <div class="ai-orb-area">
+
+                    <div
+                        id="aiOrb"
+                        class="ai-orb"
+                    >
+
+                        <div class="orb-core"></div>
+
+                    </div>
+
+                    <p id="aiOrbStatus">
+                        Нажмите на шар
+                    </p>
+
+                </div>
+
+
+                <div class="ai-chat">
+
+                    <div
+                        id="aiMessages"
+                        class="ai-messages"
+                    ></div>
+
+                    <form
+                        id="aiForm"
+                        class="ai-input"
+                    >
+
+                        <input
+                            id="aiInput"
+                            type="text"
+                            placeholder="Спросите что-нибудь..."
+                        >
+
+                        <button
+                            type="submit"
+                            class="send-button"
+                        >
+                            →
+                        </button>
+
+                    </form>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<!-- =====================================================
+     CANDIDATE MODAL
+===================================================== -->
+
+<div
+    id="candidateModal"
+    class="modal hidden"
+>
+
+    <div class="modal-backdrop"></div>
+
+    <div class="candidate-modal">
+
+        <button
+            id="closeCandidateModal"
+            class="modal-close"
+        >
+            ×
+        </button>
+
+        <div
+            id="candidateModalContent"
+        ></div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     WARNING MODAL
+===================================================== -->
+
+<div
+    id="externalLinkModal"
+    class="modal hidden"
+>
+
+    <div class="modal-backdrop"></div>
+
+    <div class="warning-modal">
+
+        <div class="warning-icon">
+            !
+        </div>
+
+        <h3>
+            Непроверенный источник
+        </h3>
+
+        <p>
+            Этот источник не был проверен
+            администрацией Пинийской Федерации.
+        </p>
+
+        <div class="warning-url">
+            <span id="warningUrl"></span>
+        </div>
+
+        <div class="warning-actions">
+
+            <button
+                id="cancelExternalLink"
+                class="small-button"
+            >
+                Отменить
+            </button>
+
+            <button
+                id="confirmExternalLink"
+                class="neon-button"
+            >
+                Перейти
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     MODERATOR CONSOLE
+===================================================== -->
+
+<div
+    id="moderatorConsole"
+    class="moderator-console hidden"
+>
+
+    <div class="console-prefix">
+        PF&gt;
+    </div>
+
+    <input
+        id="moderatorInput"
+        type="text"
+        placeholder="Введите команду..."
+        autocomplete="off"
+    >
+
+</div>
+
+
+<script src="/app.js"></script>
+
+</body>
+</html>
