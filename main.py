@@ -1431,13 +1431,23 @@ async def ai(
     # -----------------------------------------------------
 
     weather_match = re.search(
-        r"(?:погод[аеуы]|температур[аеуы]).*?(?:в|у|для)\s+([A-Za-zА-Яа-яЁё\s-]+)",
+        r"(?:погод[аеуы]|температур[аеуы]).*?"
+        r"(?:в|у|для|на)\s+"
+        r"([A-Za-zА-Яа-яЁё0-9\s-]+?)(?:\?|$|,|!|\.)",
         lower
     )
 
     if weather_match:
 
         city = weather_match.group(1).strip()
+
+        # Убираем возможные лишние слова в конце
+        city = re.sub(
+            r"\s+(сейчас|сегодня|сейчас\s+там)$",
+            "",
+            city,
+            flags=re.IGNORECASE
+        ).strip()
 
         try:
 
@@ -1553,14 +1563,12 @@ async def generate_image(
     user = await require_user(request)
 
     if not CLOUDFLARE_ACCOUNT_ID:
-
         raise HTTPException(
             status_code=503,
             detail="Cloudflare account ID is not configured."
         )
 
     if not CLOUDFLARE_API_KEY:
-
         raise HTTPException(
             status_code=503,
             detail="Cloudflare API key is not configured."
@@ -1573,7 +1581,6 @@ async def generate_image(
     ).strip()
 
     if not prompt:
-
         raise HTTPException(
             status_code=400,
             detail="Prompt is empty."
@@ -1605,20 +1612,138 @@ async def generate_image(
             }
         )
 
+    # -----------------------------------------------------
+    # CLOUDFLARE ERROR
+    # -----------------------------------------------------
+
     if response.status_code != 200:
+
+        print(
+            "[CLOUDFLARE IMAGE ERROR]",
+            response.status_code,
+            response.text[:1000]
+        )
 
         raise HTTPException(
             status_code=502,
-            detail="Cloudflare image generation failed."
+            detail=(
+                "Cloudflare image generation failed: "
+                + response.text[:500]
+            )
         )
 
-    image_data = response.content
+    # -----------------------------------------------------
+    # GET IMAGE DATA
+    # -----------------------------------------------------
+
+    content_type = (
+        response.headers.get(
+            "content-type",
+            ""
+        ).lower()
+    )
+
+    image_data = None
+
+    # Cloudflare sometimes returns the image directly
+    if content_type.startswith("image/"):
+
+        image_data = response.content
+
+        real_content_type = (
+            content_type.split(";")[0]
+        )
+
+    else:
+
+        # Otherwise try to read JSON response
+        try:
+
+            result = response.json()
+
+        except Exception:
+
+            print(
+                "[CLOUDFLARE IMAGE ERROR] "
+                "Unknown response format:",
+                content_type,
+                response.text[:1000]
+            )
+
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Cloudflare returned "
+                    "an unknown image format."
+                )
+            )
+
+        # -------------------------------------------------
+        # TRY COMMON CLOUDFLARE IMAGE FIELDS
+        # -------------------------------------------------
+
+        image_base64 = (
+            result.get("result", {})
+            if isinstance(
+                result.get("result"),
+                dict
+            )
+            else {}
+        ).get("image")
+
+        if image_base64:
+
+            import base64
+
+            try:
+
+                image_data = base64.b64decode(
+                    image_base64
+                )
+
+            except Exception:
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Cloudflare returned "
+                        "invalid base64 image data."
+                    )
+                )
+
+            real_content_type = "image/png"
+
+        else:
+
+            print(
+                "[CLOUDFLARE IMAGE RESPONSE]",
+                result
+            )
+
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Cloudflare did not return "
+                    "an image."
+                )
+            )
+
+    # -----------------------------------------------------
+    # SAVE IMAGE TO MONGODB
+    # -----------------------------------------------------
+
+    if not image_data:
+
+        raise HTTPException(
+            status_code=502,
+            detail="Generated image is empty."
+        )
 
     file_id = uuid.uuid4().hex
 
     await files_collection.insert_one({
         "_id": file_id,
-        "content_type": "image/png",
+        "content_type": real_content_type,
         "filename": "ai-generated.png",
         "data": image_data,
         "created_at": now(),
@@ -1626,9 +1751,9 @@ async def generate_image(
     })
 
     return {
-        "image_url": "/api/file/" + file_id
+        "image_url":
+            "/api/file/" + file_id
     }
-
 
 # =========================================================
 # VOICE -> GROQ WHISPER
