@@ -1380,10 +1380,19 @@ async def groq_chat(
         )
 
     if response.status_code != 200:
-
+        print(
+            "[GROQ ERROR]",
+            response.status_code,
+            response.text
+        )
+    
         raise HTTPException(
             status_code=502,
-            detail="Groq API error."
+            detail=(
+                f"Groq API error: "
+                f"{response.status_code} "
+                f"{response.text[:500]}"
+            )
         )
 
     data = response.json()
