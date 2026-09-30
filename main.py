@@ -920,6 +920,112 @@ async def vote(
         "ok": True
     }
 
+@app.post("/api/candidates/upload-image")
+async def upload_candidate_image(
+    request: Request,
+    image: UploadFile = File(...)
+):
+
+    require_db()
+
+    # Пользователь должен быть авторизован
+    await require_user(request)
+
+    # Проверяем тип файла
+    if (
+        not image.content_type
+        or not image.content_type.startswith("image/")
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="Можно загружать только изображения."
+        )
+
+    # Читаем файл
+    data = await image.read()
+
+    # Максимальный размер — 10 MB
+    if len(data) > 10 * 1024 * 1024:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Изображение слишком большое. Максимум 10 MB."
+        )
+
+    if not data:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Файл пустой."
+        )
+
+    # Ищем первого кандидата без изображения
+    candidate = await candidates.find_one(
+        {
+            "$or": [
+                {
+                    "image_id": {
+                        "$exists": False
+                    }
+                },
+                {
+                    "image_id": None
+                },
+                {
+                    "image_id": ""
+                }
+            ]
+        },
+        sort=[
+            ("slot", ASCENDING)
+        ]
+    )
+
+    if not candidate:
+
+        raise HTTPException(
+            status_code=400,
+            detail="У всех кандидатов уже есть изображения."
+        )
+
+    # Создаём ID файла
+    file_id = uuid.uuid4().hex
+
+    # Сохраняем изображение в MongoDB
+    await files_collection.insert_one({
+        "_id": file_id,
+        "content_type": image.content_type,
+        "filename": image.filename,
+        "data": data,
+        "created_at": now()
+    })
+
+    # Привязываем изображение к кандидату
+    await candidates.update_one(
+        {
+            "_id": candidate["_id"]
+        },
+        {
+            "$set": {
+                "image_id": file_id
+            }
+        }
+    )
+
+    # Получаем обновлённого кандидата
+    updated_candidate = await candidates.find_one(
+        {
+            "_id": candidate["_id"]
+        }
+    )
+
+    return {
+        "ok": True,
+        "candidate": serialize_candidate(
+            updated_candidate
+        )
+    }
 
 @app.get("/api/results")
 async def results():
