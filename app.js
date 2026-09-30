@@ -1261,35 +1261,78 @@ function addAiMessage(
 }
 
 
-function addAiImage(
-    url
-) {
+function addAiImage(url) {
 
-    const container =
-        $("#aiMessages");
+    const container = $("#aiMessages");
 
-    const element =
-        document.createElement(
-            "div"
+    const element = document.createElement("div");
+
+    element.className = "ai-message assistant";
+
+    const image = document.createElement("img");
+
+    image.className = "ai-generated-image";
+
+    /*
+     * Если backend вернул относительный URL,
+     * превращаем его в полный URL текущего сайта.
+     *
+     * Например:
+     * /api/file/123
+     *
+     * станет:
+     * https://elections-1dp0.onrender.com/api/file/123
+     */
+    let imageUrl = url;
+
+    try {
+        imageUrl = new URL(
+            url,
+            window.location.origin
+        ).href;
+    } catch (_) {
+        console.error(
+            "[AI IMAGE] Invalid image URL:",
+            url
+        );
+    }
+
+    image.src = imageUrl;
+
+    image.alt = "Изображение, созданное ИИ";
+
+    image.style.maxWidth = "100%";
+    image.style.borderRadius = "15px";
+    image.style.display = "block";
+
+    /*
+     * Если браузер не смог загрузить изображение,
+     * вместо стандартной битой картинки показываем
+     * понятную ошибку.
+     */
+    image.onerror = () => {
+
+        console.error(
+            "[AI IMAGE] Failed to load:",
+            imageUrl
         );
 
-    element.className =
-        "ai-message assistant";
+        image.remove();
 
-    element.innerHTML = `
-        <img
-            src="${url}"
-            style="
-                max-width:100%;
-                border-radius:15px;
-                display:block;
-            "
-        >
-    `;
+        const error = document.createElement("div");
 
-    container.appendChild(
-        element
-    );
+        error.textContent =
+            "Не удалось загрузить изображение.";
+
+        error.style.color = "#ff6b6b";
+        error.style.marginTop = "8px";
+
+        element.appendChild(error);
+    };
+
+    element.appendChild(image);
+
+    container.appendChild(element);
 
     container.scrollTop =
         container.scrollHeight;
