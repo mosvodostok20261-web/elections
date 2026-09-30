@@ -1283,7 +1283,9 @@ async def end_election(
 
 @app.get("/api/weather")
 async def weather(
-    city: str
+    city: str = None,
+    lat: float = None,
+    lon: float = None
 ):
 
     if not OPENWEATHER_API_KEY:
@@ -1297,12 +1299,39 @@ async def weather(
         "https://api.openweathermap.org/data/2.5/weather"
     )
 
-    params = {
-        "q": city,
-        "appid": OPENWEATHER_API_KEY,
-        "units": "metric",
-        "lang": "ru"
-    }
+    # -----------------------------------------------------
+    # WEATHER BY COORDINATES
+    # -----------------------------------------------------
+
+    if lat is not None and lon is not None:
+
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric",
+            "lang": "ru"
+        }
+
+    # -----------------------------------------------------
+    # WEATHER BY CITY
+    # -----------------------------------------------------
+
+    elif city:
+
+        params = {
+            "q": city,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric",
+            "lang": "ru"
+        }
+
+    else:
+
+        raise HTTPException(
+            status_code=400,
+            detail="City or coordinates are required."
+        )
 
     async with httpx.AsyncClient(
         timeout=15
@@ -1325,6 +1354,8 @@ async def weather(
     return {
         "city": data["name"],
         "country": data["sys"]["country"],
+        "latitude": data["coord"]["lat"],
+        "longitude": data["coord"]["lon"],
         "temperature": data["main"]["temp"],
         "feels_like": data["main"]["feels_like"],
         "humidity": data["main"]["humidity"],
@@ -1335,7 +1366,6 @@ async def weather(
             "weather"
         ][0]["icon"]
     }
-
 
 # =========================================================
 # AI
